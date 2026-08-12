@@ -86,10 +86,16 @@ if not data.empty:
     # Calcul de la Régression Linéaire sur les Logarithmes (y = mx + b)
     x = df_clean['Ordinal_Time']
     y = df_clean['Log_Price']
-    slope, intercept = np.polyfit(x, y, 1)
-    
+    slopes, res, *_ = np.polyfit(x, y, 1,full=True)
+    slope,intercept = slopes[0],slopes[1]
+#,residuals, *_
     df_clean['Regression_Log'] = slope * x + intercept
-    
+
+    # # --- CALCUL DU COEFFICIENT DE DÉTERMINATION (R²) ---
+    ss_res = res[0]
+    ss_tot = np.sum((y-y.mean())**2)
+    r2 = 1-ss_res/ss_tot
+
     # --- CALCUL DE LA PENTE ANNUELLE (CAGR) ---
     pente_annuelle_pct = (np.exp(slope * 252) - 1) * 100
     
@@ -105,7 +111,7 @@ if not data.empty:
     df_clean['-2_STD'] = np.exp(df_clean['Regression_Log'] - 2 * std_dev)
     
     # Indicateurs clés dynamiques
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     current_price = float(df_clean['Price'].iloc[-1])
     current_reg = float(df_clean['Regression'].iloc[-1])
     deviation_pct = ((current_price - current_reg) / current_reg) * 100
@@ -114,6 +120,7 @@ if not data.empty:
     col2.metric("Valeur Théorique (Moyenne)", f"{current_reg:.2f} €")
     col3.metric("Écart à la Moyenne", f"{deviation_pct:+.2f} %")
     col4.metric("Pente (Croissance Annuelle)", f"{pente_annuelle_pct:+.2f} % / an")
+    col5.metric("Coefficient de Détermination (R2) ", f"{r2:+.2f}")
     
     # --- 1er GRAPHIQUE : RÉGRESSION LOGARITHMIQUE ---
     st.write("### Droite de régression du cours en échelle logarithme")
