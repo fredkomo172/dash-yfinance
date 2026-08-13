@@ -16,16 +16,17 @@ st.write(
 
 # 1. Base de données locale des 40 actions du CAC 40
 CAC40_COMPANIES = {
-    "Air Liquide": "AI.PA", "Airbus": "AIR.PA", "Alstom": "ALO.PA", "ArcelorMittal": "MT.PA",
-    "AXA": "CS.PA", "BNP Paribas": "BNP.PA", "Bouygues": "EN.PA", "Capgemini": "CAP.PA",
-    "Carrefour": "CA.PA", "Crédit Agricole": "ACA.PA", "Danone": "BN.PA", "Dassault Systèmes": "DSY.PA",
-    "Edenred": "EDEN.PA", "Engie": "ENGI.PA", "EssilorLuxottica": "EL.PA", "Eurofins Scientific": "ERF.PA",
+    "Air Liquide": "AI.PA", "Airbus": "AIR.PA", "ArcelorMittal": "MT.PA",
+    "AXA": "CS.PA", "BNP Paribas": "BNP.PA", "Bouygues": "EN.PA", "Euronext":"ENX.PA", "Eiffage": "FGR.PA", "Capgemini": "CAP.PA",
+    "Carrefour": "CA.PA", "Crédit Agricole": "ACA.PA", "Danone": "BN.PA", "Dassault Systèmes": "DSY.PA", 
+    "Engie": "ENGI.PA", "EssilorLuxottica": "EL.PA", "Eurofins Scientific": "ERF.PA",
     "Hermès": "RMS.PA", "Kering": "KER.PA", "L'Oréal": "OR.PA", "Legrand": "LR.PA",
     "LVMH": "MC.PA", "Michelin": "ML.PA", "Orange": "ORA.PA", "Pernod Ricard": "RI.PA",
     "Publicis Groupe": "PUB.PA", "Renault": "RNO.PA", "Safran": "SAF.PA", "Saint-Gobain": "SGO.PA",
     "Sanofi": "SAN.PA", "Schneider Electric": "SU.PA", "Société Générale": "GLE.PA", "Stellantis": "STLAP.PA",
-    "STMicroelectronics": "STMPA.PA", "Teleperformance": "TEP.PA", "Thales": "HO.PA", "TotalEnergies": "TTE.PA",
-    "Unibail-Rodamco-Westfield": "URW.PA", "Veolia Environnement": "VIE.PA", "Vinci": "DG.PA", "Vivendi": "VIV.PA"
+    "STMicroelectronics": "STMPA.PA", "Thales": "HO.PA", "TotalEnergies": "TTE.PA",
+    "Unibail-Rodamco-Westfield": "URW.PA", "Veolia Environnement": "VIE.PA", "Vinci": "DG.PA","Accor":"AC.PA", 
+    "Bureau Veritas": "BVI.PA"
 }
 
 # --- Configuration de l'analyse ---
@@ -86,10 +87,16 @@ if not data.empty:
     # Calcul de la Régression Linéaire sur les Logarithmes (y = mx + b)
     x = df_clean['Ordinal_Time']
     y = df_clean['Log_Price']
-    slope, intercept = np.polyfit(x, y, 1)
-    
+    slopes, res, *_ = np.polyfit(x, y, 1,full=True)
+    slope,intercept = slopes[0],slopes[1]
+#,residuals, *_
     df_clean['Regression_Log'] = slope * x + intercept
-    
+
+    # # --- CALCUL DU COEFFICIENT DE DÉTERMINATION (R²) ---
+    ss_res = res[0]
+    ss_tot = np.sum((y-y.mean())**2)
+    r2 = 1-ss_res/ss_tot
+
     # --- CALCUL DE LA PENTE ANNUELLE (CAGR) ---
     pente_annuelle_pct = (np.exp(slope * 252) - 1) * 100
     
@@ -105,7 +112,7 @@ if not data.empty:
     df_clean['-2_STD'] = np.exp(df_clean['Regression_Log'] - 2 * std_dev)
     
     # Indicateurs clés dynamiques
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     current_price = float(df_clean['Price'].iloc[-1])
     current_reg = float(df_clean['Regression'].iloc[-1])
     deviation_pct = ((current_price - current_reg) / current_reg) * 100
@@ -114,6 +121,7 @@ if not data.empty:
     col2.metric("Valeur Théorique (Moyenne)", f"{current_reg:.2f} €")
     col3.metric("Écart à la Moyenne", f"{deviation_pct:+.2f} %")
     col4.metric("Pente (Croissance Annuelle)", f"{pente_annuelle_pct:+.2f} % / an")
+    col5.metric("Coefficient de Détermination (R2) ", f"{r2:+.2f}")
     
     # --- 1er GRAPHIQUE : RÉGRESSION LOGARITHMIQUE ---
     st.write("### Droite de régression du cours en échelle logarithme")
