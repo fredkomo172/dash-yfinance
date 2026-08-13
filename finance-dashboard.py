@@ -16,16 +16,17 @@ st.write(
 
 # 1. Base de données locale des 40 actions du CAC 40
 CAC40_COMPANIES = {
-    "Air Liquide": "AI.PA", "Airbus": "AIR.PA", "Alstom": "ALO.PA", "ArcelorMittal": "MT.PA",
-    "AXA": "CS.PA", "BNP Paribas": "BNP.PA", "Bouygues": "EN.PA", "Capgemini": "CAP.PA",
-    "Carrefour": "CA.PA", "Crédit Agricole": "ACA.PA", "Danone": "BN.PA", "Dassault Systèmes": "DSY.PA",
-    "Edenred": "EDEN.PA", "Engie": "ENGI.PA", "EssilorLuxottica": "EL.PA", "Eurofins Scientific": "ERF.PA",
+    "Air Liquide": "AI.PA", "Airbus": "AIR.PA", "ArcelorMittal": "MT.PA",
+    "AXA": "CS.PA", "BNP Paribas": "BNP.PA", "Bouygues": "EN.PA", "Euronext":"ENX.PA", "Eiffage": "FGR.PA", "Capgemini": "CAP.PA",
+    "Carrefour": "CA.PA", "Crédit Agricole": "ACA.PA", "Danone": "BN.PA", "Dassault Systèmes": "DSY.PA", 
+    "Engie": "ENGI.PA", "EssilorLuxottica": "EL.PA", "Eurofins Scientific": "ERF.PA",
     "Hermès": "RMS.PA", "Kering": "KER.PA", "L'Oréal": "OR.PA", "Legrand": "LR.PA",
     "LVMH": "MC.PA", "Michelin": "ML.PA", "Orange": "ORA.PA", "Pernod Ricard": "RI.PA",
     "Publicis Groupe": "PUB.PA", "Renault": "RNO.PA", "Safran": "SAF.PA", "Saint-Gobain": "SGO.PA",
     "Sanofi": "SAN.PA", "Schneider Electric": "SU.PA", "Société Générale": "GLE.PA", "Stellantis": "STLAP.PA",
-    "STMicroelectronics": "STMPA.PA", "Teleperformance": "TEP.PA", "Thales": "HO.PA", "TotalEnergies": "TTE.PA",
-    "Unibail-Rodamco-Westfield": "URW.PA", "Veolia Environnement": "VIE.PA", "Vinci": "DG.PA", "Vivendi": "VIV.PA"
+    "STMicroelectronics": "STMPA.PA", "Thales": "HO.PA", "TotalEnergies": "TTE.PA",
+    "Unibail-Rodamco-Westfield": "URW.PA", "Veolia Environnement": "VIE.PA", "Vinci": "DG.PA","Accor":"AC.PA", 
+    "Bureau Veritas": "BVI.PA"
 }
 
 # --- Configuration de l'analyse ---
