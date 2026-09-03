@@ -4,40 +4,194 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from pathlib import Path
+import json
+import logging
+
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Constantes métier
+TRADING_DAYS_PER_YEAR = 252  # Nombre de jours de trading par an
+DIVIDEND_BAR_WIDTH_MS = 30 * 24 * 60 * 60 * 1000  # 30 jours en millisecondes
+MIN_DATA_POINTS = 20  # Minimum de points de données pour une régression fiable
+MAX_LOG_SLOPE = 0.5  # Limite pour éviter l'overflow dans exp()
+PROJECT_DIR = Path(__file__).parent
+CAC40_SEED_FILE = PROJECT_DIR / "cac40.json"
+CAC40_FILE = PROJECT_DIR / "data" / "cac40.json"
+CAC40_SOURCE_URL = "https://en.wikipedia.org/wiki/CAC_40"
+CAC40_REFRESH_DAYS = 7
+SP500_SEED_FILE = PROJECT_DIR / "sp500.json"
+SP500_FILE = PROJECT_DIR / "data" / "sp500.json"
+SP500_SOURCE_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+INDEX_FILES = {
+    "CAC 40": CAC40_FILE,
+    "S&P 500": SP500_FILE,
+    "SBF 120": PROJECT_DIR / "sbf120.json",
+}
 
 # Configuration de la page d'accueil Streamlit
 st.set_page_config(page_title="CAC 40 — Régression & Dividendes", layout="wide")
 
-st.title("Analyse Logarithmique & Historique des Dividendes — CAC 40")
+st.title("Analyse Logarithmique & Historique des Dividendes")
 st.write(
     "Cette application affiche la droite de régression linéaire avec sa pente (taux annuel), "
     "ainsi que l'historique des dividendes versés sous forme de diagramme à barres."
 )
 
-# 1. Base de données locale des 40 actions du CAC 40
-CAC40_COMPANIES = {
-    "Air Liquide": "AI.PA", "Airbus": "AIR.PA", "ArcelorMittal": "MT.PA",
-    "AXA": "CS.PA", "BNP Paribas": "BNP.PA", "Bouygues": "EN.PA", "Euronext":"ENX.PA", "Eiffage": "FGR.PA", "Capgemini": "CAP.PA",
-    "Carrefour": "CA.PA", "Crédit Agricole": "ACA.PA", "Danone": "BN.PA", "Dassault Systèmes": "DSY.PA", 
-    "Engie": "ENGI.PA", "EssilorLuxottica": "EL.PA", "Eurofins Scientific": "ERF.PA",
-    "Hermès": "RMS.PA", "Kering": "KER.PA", "L'Oréal": "OR.PA", "Legrand": "LR.PA",
-    "LVMH": "MC.PA", "Michelin": "ML.PA", "Orange": "ORA.PA", "Pernod Ricard": "RI.PA",
-    "Publicis Groupe": "PUB.PA", "Renault": "RNO.PA", "Safran": "SAF.PA", "Saint-Gobain": "SGO.PA",
-    "Sanofi": "SAN.PA", "Schneider Electric": "SU.PA", "Société Générale": "GLE.PA", "Stellantis": "STLAP.PA",
-    "STMicroelectronics": "STMPA.PA", "Thales": "HO.PA", "TotalEnergies": "TTE.PA",
-    "Unibail-Rodamco-Westfield": "URW.PA", "Veolia Environnement": "VIE.PA", "Vinci": "DG.PA","Accor":"AC.PA", 
-    "Bureau Veritas": "BVI.PA"
-}
+# 1. Listes d'indices locales
+def _read_index_file(file_path):
+    with file_path.open(encoding="utf-8") as file:
+        content = json.load(file)
+    companies = content.get("companies")
+    if not isinstance(companies, dict):
+        raise ValueError(f"Le fichier {file_path.name} ne contient pas de liste valide")
+    if any(not isinstance(name, str) or not isinstance(ticker, str) or not ticker
+           for name, ticker in companies.items()):
+        raise ValueError(f"Le fichier {file_path.name} contient une entrée invalide")
+    return content, companies
+
+
+def _read_cac40_file():
+    return _read_index_file(CAC40_FILE)
+
+
+def _update_cac40_file():
+    """Récupère la composition publiée et remplace le JSON uniquement si elle est valide."""
+    tables = pd.read_html(CAC40_SOURCE_URL)
+    composition = next(
+        table for table in tables
+        if {"Company", "Ticker"}.issubset(table.columns)
+    )
+    companies = {}
+    for _, row in composition.iterrows():
+        name = str(row["Company"]).strip()
+        ticker = str(row["Ticker"]).strip()
+        if name and ticker and ticker != "nan":
+            companies[name] = ticker if ticker.endswith(".PA") else f"{ticker}.PA"
+    if len(companies) < 35:
+        raise ValueError("La source web ne contient pas une composition CAC 40 crédible")
+
+    content = {
+        "updated_at": datetime.now().astimezone().isoformat(),
+        "source": CAC40_SOURCE_URL,
+        "companies": companies,
+    }
+    temporary_file = CAC40_FILE.with_suffix(".tmp")
+    with temporary_file.open("w", encoding="utf-8") as file:
+        json.dump(content, file, ensure_ascii=False, indent=2)
+    temporary_file.replace(CAC40_FILE)
+    return companies
+
+
+def _update_sp500_file():
+    """Récupère le CSV public du S&P 500 et remplace le JSON après validation."""
+    composition = pd.read_csv(SP500_SOURCE_URL, usecols=["Symbol", "Security"])
+    composition = composition.dropna(subset=["Symbol", "Security"])
+    companies = {
+        str(row["Security"]).strip(): str(row["Symbol"]).strip().replace(".", "-")
+        for _, row in composition.iterrows()
+    }
+    if len(companies) < 450:
+        raise ValueError("La source web ne contient pas une composition S&P 500 crédible")
+
+    content = {
+        "index": "S&P 500",
+        "updated_at": datetime.now().astimezone().isoformat(),
+        "source": SP500_SOURCE_URL,
+        "source_format": "csv",
+        "companies": companies,
+    }
+    temporary_file = SP500_FILE.with_suffix(".tmp")
+    with temporary_file.open("w", encoding="utf-8") as file:
+        json.dump(content, file, ensure_ascii=False, indent=2)
+    temporary_file.replace(SP500_FILE)
+    return companies
+
+
+def load_cac40_companies():
+    try:
+        CAC40_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not CAC40_FILE.exists():
+            CAC40_FILE.write_bytes(CAC40_SEED_FILE.read_bytes())
+        content, companies = _read_cac40_file()
+        updated_at = datetime.fromisoformat(content["updated_at"].replace("Z", "+00:00"))
+        age = datetime.now().astimezone() - updated_at
+        if age >= timedelta(days=CAC40_REFRESH_DAYS):
+            try:
+                companies = _update_cac40_file()
+                st.toast("La liste CAC 40 a été mise à jour.")
+            except (OSError, ValueError, ImportError, StopIteration) as error:
+                logger.warning("Mise à jour CAC 40 impossible: %s", error)
+                st.info("Mise à jour CAC 40 impossible : utilisation de la dernière liste locale.")
+        return companies
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError, OSError) as error:
+        logger.error("Impossible de charger la liste CAC 40: %s", error)
+        st.error(f"Impossible de charger la liste CAC 40 : {error}")
+        st.stop()
+
+
+def load_sp500_companies():
+    try:
+        SP500_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not SP500_FILE.exists():
+            SP500_FILE.write_bytes(SP500_SEED_FILE.read_bytes())
+        content, companies = _read_index_file(SP500_FILE)
+        updated_at = datetime.fromisoformat(content["updated_at"].replace("Z", "+00:00"))
+        is_expired = datetime.now().astimezone() - updated_at >= timedelta(days=CAC40_REFRESH_DAYS)
+        if is_expired or len(companies) < 450:
+            try:
+                companies = _update_sp500_file()
+                st.toast("La liste S&P 500 a été mise à jour.")
+            except Exception as error:
+                logger.warning("Mise à jour S&P 500 impossible: %s", error)
+                if not companies:
+                    raise ValueError("La liste S&P 500 locale est vide") from error
+                st.info("Mise à jour S&P 500 impossible : utilisation de la dernière liste locale.")
+        return companies
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError, OSError) as error:
+        logger.error("Impossible de charger la liste S&P 500: %s", error)
+        st.error(f"Impossible de charger la liste S&P 500 : {error}")
+        st.stop()
+
+
+def load_index_companies(index_name):
+    if index_name == "CAC 40":
+        return load_cac40_companies()
+    if index_name == "S&P 500":
+        return load_sp500_companies()
+
+    try:
+        _, companies = _read_index_file(INDEX_FILES[index_name])
+        if not companies:
+            raise ValueError(
+                f"La liste {index_name} est vide. Sa composition doit encore être importée."
+            )
+        return companies
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError, OSError) as error:
+        logger.error("Impossible de charger la liste %s: %s", index_name, error)
+        st.error(f"Impossible de charger la liste {index_name} : {error}")
+        st.stop()
 
 # --- Configuration de l'analyse ---
 st.subheader("Configuration")
-col_select, col_slider = st.columns([1, 1])
+col_index, col_select, col_slider = st.columns([1, 1, 1])
+
+with col_index:
+    selected_index = st.selectbox(
+        "Sélectionnez l'indice :",
+        options=list(INDEX_FILES.keys()),
+    )
+
+index_companies = load_index_companies(selected_index)
 
 with col_select:
     selected_company = st.selectbox(
         "Sélectionnez l'action à étudier :",
-        options=list(CAC40_COMPANIES.keys()),
-        index=20  # Position de LVMH par défaut
+        options=list(index_companies.keys()),
+        index=(list(index_companies.keys()).index("LVMH")
+               if "LVMH" in index_companies else 0),
     )
 
 with col_slider:
@@ -46,25 +200,51 @@ with col_slider:
         min_value=5, max_value=30, value=20, step=1
     )
 
-ticker_symbol = CAC40_COMPANIES[selected_company]
+ticker_symbol = index_companies[selected_company]
 
 # 2. Fonction de téléchargement (Prix + Dividendes)
 @st.cache_data(ttl=3600)
 def load_data_and_dividends(ticker, years):
+    """Télécharge les données de prix et dividendes avec gestion d'erreurs robuste."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=years * 365)
     
-    # Téléchargement des prix de marché
-    df = yf.download(ticker, start=start_date, end=end_date)
-    
-    # Récupération spécifique des dividendes via l'objet Ticker
-    tk = yf.Ticker(ticker)
     try:
+        # Téléchargement des prix de marché
+        logger.info(f"Téléchargement des données pour {ticker}...")
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        
+        if df.empty:
+            logger.error(f"Aucune donnée trouvée pour {ticker}")
+            return df, pd.Series(dtype='float64')
+            
+    except Exception as e:
+        logger.error(f"Erreur lors du téléchargement des prix pour {ticker}: {str(e)}")
+        return pd.DataFrame(), pd.Series(dtype='float64')
+    
+    # Récupération des dividendes
+    div_series = pd.Series(dtype='float64')
+    try:
+        tk = yf.Ticker(ticker)
         div_series = tk.dividends
-        # Filtrer pour ne garder que la période sélectionnée
-        start_date_pd = pd.to_datetime(start_date).tz_localize(div_series.index.tz)
-        div_series = div_series[div_series.index >= start_date_pd]
-    except:
+        
+        if not div_series.empty:
+            # Filtrer pour ne garder que la période sélectionnée
+            try:
+                # Gérer les fuseaux horaires correctement
+                start_date_pd = pd.to_datetime(start_date)
+                if div_series.index.tz is not None:
+                    start_date_pd = start_date_pd.tz_localize(div_series.index.tz)
+                div_series = div_series[div_series.index >= start_date_pd]
+                logger.info(f"Dividendes trouvés: {len(div_series)} versements")
+            except Exception as e:
+                logger.warning(f"Impossible de filtrer les dividendes: {str(e)}")
+                div_series = pd.Series(dtype='float64')
+        else:
+            logger.info(f"Aucun dividende trouvé pour {ticker}")
+            
+    except Exception as e:
+        logger.warning(f"Erreur lors de la récupération des dividendes pour {ticker}: {str(e)}")
         div_series = pd.Series(dtype='float64')
         
     return df, div_series
@@ -73,49 +253,122 @@ with st.spinner(f"Téléchargement des données de {selected_company}..."):
     data, dividends = load_data_and_dividends(ticker_symbol, nb_annees)
 
 if not data.empty:
+    # Correction des MultiIndex si nécessaire
     if isinstance(data.columns, pd.MultiIndex):
-        data.columns = [col[0] for col in data.columns]
-        
+        try:
+            data.columns = [col[0] for col in data.columns]
+            logger.info("MultiIndex corrigé")
+        except Exception as e:
+            logger.error(f"Erreur lors de la correction du MultiIndex: {str(e)}")
+            st.error("Format de données inattendu. Impossible de traiter.")
+            st.stop()
+    
+    # Sélection de la colonne de prix
     price_col = 'Adj Close' if 'Adj Close' in data.columns else 'Close'
+    if price_col not in data.columns:
+        st.error(f"Colonne '{price_col}' non trouvée. Colonnes disponibles: {data.columns.tolist()}")
+        st.stop()
+    
     df_clean = data[[price_col]].dropna().copy()
     df_clean.columns = ['Price']
     
+    # Validation: au moins MIN_DATA_POINTS points de données
+    if len(df_clean) < MIN_DATA_POINTS:
+        st.error(f"Données insuffisantes: {len(df_clean)} points. Minimum requis: {MIN_DATA_POINTS}")
+        st.stop()
+    
+    logger.info(f"Données nettoyées: {len(df_clean)} points de données")
+    
+    # Validation: pas de prix négatifs ou nuls
+    if (df_clean['Price'] <= 0).any():
+        st.error("Données invalides: prix négatif ou nul détecté")
+        st.stop()
+    
     # Étape mathématique : passage au logarithme naturel
-    df_clean['Log_Price'] = np.log(df_clean['Price'])
-    df_clean['Ordinal_Time'] = np.arange(len(df_clean))
+    try:
+        df_clean['Log_Price'] = np.log(df_clean['Price'])
+        df_clean['Ordinal_Time'] = np.arange(len(df_clean))
+    except Exception as e:
+        st.error(f"Erreur lors du calcul des logarithmes: {str(e)}")
+        st.stop()
     
     # Calcul de la Régression Linéaire sur les Logarithmes (y = mx + b)
-    x = df_clean['Ordinal_Time']
-    y = df_clean['Log_Price']
-    slopes, res, *_ = np.polyfit(x, y, 1,full=True)
-    slope,intercept = slopes[0],slopes[1]
-#,residuals, *_
+    try:
+        x = df_clean['Ordinal_Time'].values
+        y = df_clean['Log_Price'].values
+        slopes, res, *_ = np.polyfit(x, y, 1, full=True)
+        slope, intercept = slopes[0], slopes[1]
+        logger.info(f"Régression calculée: pente={slope:.6f}, ordonnée={intercept:.6f}")
+    except Exception as e:
+        st.error(f"Erreur lors du calcul de la régression: {str(e)}")
+        st.stop()
+    
     df_clean['Regression_Log'] = slope * x + intercept
 
-    # # --- CALCUL DU COEFFICIENT DE DÉTERMINATION (R²) ---
-    ss_res = res[0]
-    ss_tot = np.sum((y-y.mean())**2)
-    r2 = 1-ss_res/ss_tot
+    # --- CALCUL DU COEFFICIENT DE DÉTERMINATION (R²) ---
+    try:
+        ss_res = res[0] if len(res) > 0 else 0
+        ss_tot = np.sum((y - y.mean()) ** 2)
+        
+        if ss_tot == 0:
+            logger.warning("Variance totale nulle: R² indéfini")
+            r2 = 0.0
+        else:
+            r2 = 1 - (ss_res / ss_tot)
+            r2 = np.clip(r2, -1, 1)  # R² doit être entre -1 et 1
+    except Exception as e:
+        logger.error(f"Erreur lors du calcul de R²: {str(e)}")
+        r2 = 0.0
 
     # --- CALCUL DE LA PENTE ANNUELLE (CAGR) ---
-    pente_annuelle_pct = (np.exp(slope * 252) - 1) * 100
+    try:
+        # Vérifier que la pente n'est pas trop grande (éviter l'overflow)
+        if abs(slope) > MAX_LOG_SLOPE:
+            logger.warning(f"Pente très élevée ({slope:.6f}), résultats potentiellement non fiables")
+        
+        pente_annuelle_pct = (np.exp(slope * TRADING_DAYS_PER_YEAR) - 1) * 100
+        logger.info(f"Pente annuelle calculée: {pente_annuelle_pct:+.2f}%")
+    except (OverflowError, ValueError) as e:
+        logger.error(f"Erreur lors du calcul de la pente annuelle: {str(e)}")
+        st.error("Pente annuelle non calculable (données extrêmes)")
+        pente_annuelle_pct = 0.0
     
     # Calcul des résidus et de l'Écart-Type
-    residuals = df_clean['Log_Price'] - df_clean['Regression_Log']
-    std_dev = np.std(residuals)
+    try:
+        residuals = df_clean['Log_Price'].values - df_clean['Regression_Log'].values
+        std_dev = np.std(residuals)
+        logger.info(f"Écart-type calculé: {std_dev:.6f}")
+    except Exception as e:
+        logger.error(f"Erreur lors du calcul des résidus: {str(e)}")
+        std_dev = 0.0
     
     # Conversion inverse vers l'échelle linéaire (euros)
-    df_clean['Regression'] = np.exp(df_clean['Regression_Log'])
-    df_clean['+1_STD'] = np.exp(df_clean['Regression_Log'] + std_dev)
-    df_clean['+2_STD'] = np.exp(df_clean['Regression_Log'] + 2 * std_dev)
-    df_clean['-1_STD'] = np.exp(df_clean['Regression_Log'] - std_dev)
-    df_clean['-2_STD'] = np.exp(df_clean['Regression_Log'] - 2 * std_dev)
+    try:
+        df_clean['Regression'] = np.exp(df_clean['Regression_Log'])
+        df_clean['+1_STD'] = np.exp(df_clean['Regression_Log'] + std_dev)
+        df_clean['+2_STD'] = np.exp(df_clean['Regression_Log'] + 2 * std_dev)
+        df_clean['-1_STD'] = np.exp(df_clean['Regression_Log'] - std_dev)
+        df_clean['-2_STD'] = np.exp(df_clean['Regression_Log'] - 2 * std_dev)
+    except (OverflowError, ValueError) as e:
+        logger.error(f"Erreur lors de la conversion logarithmique: {str(e)}")
+        st.error("Impossible de calculer les bandes d'écart-type")
+        st.stop()
     
     # Indicateurs clés dynamiques
-    col1, col2, col3, col4, col5 = st.columns(5)
-    current_price = float(df_clean['Price'].iloc[-1])
-    current_reg = float(df_clean['Regression'].iloc[-1])
-    deviation_pct = ((current_price - current_reg) / current_reg) * 100
+    try:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        current_price = float(df_clean['Price'].iloc[-1])
+        current_reg = float(df_clean['Regression'].iloc[-1])
+        
+        if current_reg != 0:
+            deviation_pct = ((current_price - current_reg) / current_reg) * 100
+        else:
+            logger.warning("Valeur théorique nulle: écart indéfini")
+            deviation_pct = 0.0
+    except (IndexError, ValueError) as e:
+        logger.error(f"Erreur lors de la récupération des métriques: {str(e)}")
+        st.error("Impossible de calculer les indicateurs clés")
+        st.stop()
     
     col1.metric(f"Prix Actuel ({selected_company})", f"{current_price:.2f} €")
     col2.metric("Valeur Théorique (Moyenne)", f"{current_reg:.2f} €")
@@ -151,34 +404,49 @@ if not data.empty:
     st.write("### Historique des Dividendes Versés")
     
     if not dividends.empty:
-        # Nettoyage des fuseaux horaires pour l'affichage de l'axe X
-        dividends.index = dividends.index.tz_localize(None)
-        
-        fig_div = go.Figure()
-        fig_div.add_trace(go.Bar(
-            x=dividends.index,
-            y=dividends.values,
-            name="Dividende versé",
-            marker_color="#2ca02c", 
-            width=30 * 24 * 60 * 60 * 1000, 
-            text=np.round(dividends.values, 2),
-            textposition='outside',             
-            textfont=dict(size=11, color='black'),
-            hovertemplate="<b>Date du détachement :</b> %{x|%d %B %Y}<br><b>Montant :</b> %{y:.2f} €<extra></extra>"
-        ))
-        
-        fig_div.update_layout(
-            xaxis=dict(title="Date de versement", fixedrange=True),
-            yaxis=dict(
-                title="Montant du Dividende (€)", 
-                fixedrange=True,
-                range=[0, max(dividends.values) * 1.15] 
-            ),
-            template="plotly_white",
-            height=350,
-            hovermode="x"
-        )
-        st.plotly_chart(fig_div, use_container_width=True, config=config_graphique)
+        try:
+            # Nettoyage des fuseaux horaires pour l'affichage de l'axe X
+            if dividends.index.tz is not None:
+                dividends_display = dividends.copy()
+                dividends_display.index = dividends_display.index.tz_localize(None)
+            else:
+                dividends_display = dividends
+            
+            fig_div = go.Figure()
+            fig_div.add_trace(go.Bar(
+                x=dividends_display.index,
+                y=dividends_display.values,
+                name="Dividende versé",
+                marker_color="#2ca02c", 
+                width=DIVIDEND_BAR_WIDTH_MS, 
+                text=np.round(dividends_display.values, 2),
+                textposition='outside',             
+                textfont=dict(size=11, color='black'),
+                hovertemplate="<b>Date du détachement :</b> %{x|%d %B %Y}<br><b>Montant :</b> %{y:.2f} €<extra></extra>"
+            ))
+            
+            max_dividend = max(dividends_display.values)
+            if max_dividend > 0:
+                y_max = max_dividend * 1.15
+            else:
+                y_max = 1  # Valeur par défaut si max est 0 ou négatif
+            
+            fig_div.update_layout(
+                xaxis=dict(title="Date de versement", fixedrange=True),
+                yaxis=dict(
+                    title="Montant du Dividende (€)", 
+                    fixedrange=True,
+                    range=[0, y_max] 
+                ),
+                template="plotly_white",
+                height=350,
+                hovermode="x"
+            )
+            st.plotly_chart(fig_div, use_container_width=True, config=config_graphique)
+            logger.info("Graphique des dividendes affiché avec succès")
+        except Exception as e:
+            logger.error(f"Erreur lors de l'affichage du graphique des dividendes: {str(e)}")
+            st.error(f"Impossible d'afficher le graphique des dividendes: {str(e)}")
     else:
         st.info(f"Aucun dividende n'a été enregistré par Yahoo Finance pour {selected_company} sur cette période.")
         

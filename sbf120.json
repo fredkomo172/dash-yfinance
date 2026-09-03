@@ -1,0 +1,9 @@
+{
+  "index": "SBF 120",
+  "updated_at": "2026-09-02T00:00:00Z",
+  "source": "https://www.euronext.com/en/products/indices/FR0003999481-XPAR/market-information",
+  "source_format": "euronext_web",
+  "status": "source_reference",
+  "note": "La composition doit etre recuperee depuis Euronext ; la page publique ne fournit pas une table statique fiable.",
+  "companies": {}
+}
