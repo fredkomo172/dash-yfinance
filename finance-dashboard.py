@@ -3,10 +3,12 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import logging
+from urllib.request import Request, urlopen
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +61,13 @@ def _read_cac40_file():
 
 def _update_cac40_file():
     """Récupère la composition publiée et remplace le JSON uniquement si elle est valide."""
-    tables = pd.read_html(CAC40_SOURCE_URL)
+    # Wikipédia refuse les requêtes sans User-Agent et renvoie alors une erreur 403.
+    request = Request(
+        CAC40_SOURCE_URL,
+        headers={"User-Agent": "finance-dashboard/1.0 (CAC 40 composition refresh)"},
+    )
+    with urlopen(request, timeout=20) as response:
+        tables = pd.read_html(BytesIO(response.read()))
     composition = next(
         table for table in tables
         if {"Company", "Ticker"}.issubset(table.columns)
