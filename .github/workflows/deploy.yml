@@ -19,5 +19,5 @@ jobs:
           script: |
             cd /home/ubuntu/src/dash-yfinance
             git pull origin main
-            pip install -r requirements.txt
+            .venv/bin/pip install -r requirements.txt
             sudo systemctl restart finance-dashboard.service
