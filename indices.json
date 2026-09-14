@@ -1,0 +1,142 @@
+{
+  "index": "Indices boursiers mondiaux",
+  "updated_at": "2026-09-10T00:00:00Z",
+  "source": "Yahoo Finance via yfinance",
+  "source_format": "yahoo_finance_symbols",
+  "index_types": {
+    "CAC 40": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "S&P 500": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^GSPC est la version de prix ; la version total return est distincte."
+    },
+    "S&P 500 Total Return": {
+      "type": "gross_total_return",
+      "label": "Rendement brut (performance)",
+      "note": "^SP500TR réinvestit les dividendes bruts."
+    },
+    "Dow Jones Industrial Average": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "Nasdaq Composite": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "Euro Stoxx 50": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^STOXX50E correspond à la version de prix."
+    },
+    "Euronext 100": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^N100 correspond à la version de prix."
+    },
+    "BEL 20": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "FTSE 100": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^FTSE est la version de prix."
+    },
+    "DAX": {
+      "type": "gross_total_return",
+      "label": "Rendement brut (performance)",
+      "note": "^GDAXI est le DAX de performance : les dividendes bruts sont réinvestis."
+    },
+    "AEX": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^AEX correspond à la version de prix."
+    },
+    "IBEX 35": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^IBEX correspond à la version de prix."
+    },
+    "SMI": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^SSMI correspond à la version de prix."
+    },
+    "Nikkei 225": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Indice pondéré par les prix, sans réinvestissement des dividendes."
+    },
+    "Hang Seng": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "Shanghai Composite": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "BSE SENSEX": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^BSESN correspond à la version de prix."
+    },
+    "Straits Times": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "N'intègre pas les dividendes des valeurs composantes."
+    },
+    "S&P/ASX 200": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^AXJO correspond à la version de prix."
+    },
+    "S&P/TSX Composite": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^GSPTSE correspond à la version de prix."
+    },
+    "Bovespa": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^BVSP correspond à la version de prix."
+    },
+    "IPC Mexico": {
+      "type": "price",
+      "label": "Indice de prix",
+      "note": "Le symbole Yahoo ^MXX correspond à la version de prix."
+    }
+  },
+  "companies": {
+    "CAC 40": "^FCHI",
+    "S&P 500": "^GSPC",
+    "S&P 500 Total Return": "^SP500TR",
+    "Dow Jones Industrial Average": "^DJI",
+    "Nasdaq Composite": "^IXIC",
+    "Euro Stoxx 50": "^STOXX50E",
+    "Euronext 100": "^N100",
+    "BEL 20": "^BFX",
+    "FTSE 100": "^FTSE",
+    "DAX": "^GDAXI",
+    "AEX": "^AEX",
+    "IBEX 35": "^IBEX",
+    "SMI": "^SSMI",
+    "Nikkei 225": "^N225",
+    "Hang Seng": "^HSI",
+    "Shanghai Composite": "000001.SS",
+    "BSE SENSEX": "^BSESN",
+    "Straits Times": "^STI",
+    "S&P/ASX 200": "^AXJO",
+    "S&P/TSX Composite": "^GSPTSE",
+    "Bovespa": "^BVSP",
+    "IPC Mexico": "^MXX"
+  }
+}

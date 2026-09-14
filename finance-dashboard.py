@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 import logging
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +20,10 @@ TRADING_DAYS_PER_YEAR = 252  # Nombre de jours de trading par an
 DIVIDEND_BAR_WIDTH_MS = 30 * 24 * 60 * 60 * 1000  # 30 jours en millisecondes
 MIN_DATA_POINTS = 20  # Minimum de points de données pour une régression fiable
 MAX_LOG_SLOPE = 0.5  # Limite pour éviter l'overflow dans exp()
+DEFAULT_LANGUAGE = "fr"
+SUPPORTED_LANGUAGES = ("fr", "en")
+if DEFAULT_LANGUAGE not in SUPPORTED_LANGUAGES:
+    raise ValueError(f"Langue par défaut non supportée : {DEFAULT_LANGUAGE}")
 PROJECT_DIR = Path(__file__).parent
 CAC40_SEED_FILE = PROJECT_DIR / "cac40.json"
 CAC40_FILE = PROJECT_DIR / "data" / "cac40.json"
@@ -27,20 +32,91 @@ CAC40_REFRESH_DAYS = 7
 SP500_SEED_FILE = PROJECT_DIR / "sp500.json"
 SP500_FILE = PROJECT_DIR / "data" / "sp500.json"
 SP500_SOURCE_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+INDICES_FILE = PROJECT_DIR / "indices.json"
 INDEX_FILES = {
+    "Indices mondiaux": INDICES_FILE,
     "CAC 40": CAC40_FILE,
     "S&P 500": SP500_FILE,
     "SBF 120": PROJECT_DIR / "sbf120.json",
 }
 
 # Configuration de la page d'accueil Streamlit
-st.set_page_config(page_title="CAC 40 — Régression & Dividendes", layout="wide")
+st.set_page_config(page_title="Finance Dashboard", layout="wide")
 
-st.title("Analyse Logarithmique & Historique des Dividendes")
-st.write(
-    "Cette application affiche la droite de régression linéaire avec sa pente (taux annuel), "
-    "ainsi que l'historique des dividendes versés sous forme de diagramme à barres."
-)
+language_col, _ = st.columns([1, 5])
+with language_col:
+    selected_language = st.segmented_control(
+        "Langue / Language",
+        options=[language.upper() for language in SUPPORTED_LANGUAGES],
+        default=DEFAULT_LANGUAGE.upper(),
+        key="language_selector",
+    )
+language = (selected_language or DEFAULT_LANGUAGE.upper()).lower()
+
+TEXTS = {
+    "fr": {
+        "title": "Analyse Logarithmique & Historique des Dividendes",
+        "intro": (
+            "Cette application affiche la droite de régression linéaire avec sa pente "
+            "(taux annuel), ainsi que l'historique des dividendes versés sous forme de "
+            "diagramme à barres."
+        ),
+        "configuration": "Configuration",
+        "index": "Sélectionnez l'indice :",
+        "company": "Sélectionnez l'action à étudier :",
+        "years": "Sélectionnez le nombre d'années d'historique :",
+        "activity": "Activité",
+        "download": "Téléchargement des données de {company}...",
+        "current_price": "Prix actuel ({company})",
+        "theoretical_value": "Valeur théorique (moyenne)",
+        "deviation": "Écart à la moyenne",
+        "growth": "Pente (croissance annuelle)",
+        "r2": "Coefficient de détermination (R2)",
+        "regression": "Droite de régression du cours en échelle logarithmique",
+        "price": "Cours de {company}",
+        "trend": "Régression linéaire (tendance)",
+        "dividends": "Historique des dividendes versés",
+        "dividend": "Dividende versé",
+        "dividend_date": "Date du détachement",
+        "dividend_amount": "Montant",
+        "no_dividends": "Aucun dividende n'a été enregistré par Yahoo Finance pour {company} sur cette période.",
+        "no_data": "Aucune donnée disponible pour {company}.",
+    },
+    "en": {
+        "title": "Logarithmic Analysis & Dividend History",
+        "intro": (
+            "This application displays the linear regression line with its slope "
+            "(annual rate), as well as the history of paid dividends in a bar chart."
+        ),
+        "configuration": "Configuration",
+        "index": "Select the index:",
+        "company": "Select the stock to analyze:",
+        "years": "Select the number of historical years:",
+        "activity": "Business activity",
+        "download": "Downloading data for {company}...",
+        "current_price": "Current price ({company})",
+        "theoretical_value": "Theoretical value (average)",
+        "deviation": "Deviation from average",
+        "growth": "Slope (annual growth)",
+        "r2": "Coefficient of determination (R2)",
+        "regression": "Logarithmic-scale price regression line",
+        "price": "{company} price",
+        "trend": "Linear regression (trend)",
+        "dividends": "Paid dividend history",
+        "dividend": "Paid dividend",
+        "dividend_date": "Ex-dividend date",
+        "dividend_amount": "Amount",
+        "no_dividends": "Yahoo Finance recorded no dividends for {company} during this period.",
+        "no_data": "No data available for {company}.",
+    },
+}
+
+
+def text(key, **values):
+    return TEXTS[language][key].format(**values)
+
+st.title(text("title"))
+st.write(text("intro"))
 
 # 1. Listes d'indices locales
 def _read_index_file(file_path):
@@ -182,21 +258,69 @@ def load_index_companies(index_name):
         st.error(f"Impossible de charger la liste {index_name} : {error}")
         st.stop()
 
+
+def load_index_metadata(index_name):
+    """Charge les informations de nature de l'indice sélectionné."""
+    if index_name != "Indices mondiaux":
+        return None
+    try:
+        content, _ = _read_index_file(INDEX_FILES[index_name])
+        return content.get("index_types", {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError, OSError) as error:
+        logger.warning("Métadonnées indisponibles pour %s : %s", index_name, error)
+        return {}
+
+
+@st.cache_data(ttl=86400)
+def load_company_description(ticker, target_language):
+    """Récupère et traduit le résumé de l'activité fourni par Yahoo Finance."""
+    try:
+        summary = yf.Ticker(ticker).info.get("longBusinessSummary", "")
+        if not isinstance(summary, str) or not summary.strip():
+            return ""
+        summary = summary.strip()
+        if target_language == "en":
+            return summary
+        chunks = []
+        current_chunk = ""
+        for word in summary.split():
+            if current_chunk and len(current_chunk) + len(word) + 1 > 450:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            current_chunk = f"{current_chunk} {word}".strip()
+        if current_chunk:
+            chunks.append(current_chunk)
+        translated_chunks = []
+        for chunk in chunks:
+            query = urlencode({"q": chunk, "langpair": "en|fr"})
+            request = Request(
+                f"https://api.mymemory.translated.net/get?{query}",
+                headers={"User-Agent": "finance-dashboard/1.0"},
+            )
+            with urlopen(request, timeout=20) as response:
+                translation = json.load(response)["responseData"]["translatedText"]
+            translated_chunks.append(translation)
+        return " ".join(translated_chunks)
+    except Exception as error:
+        logger.warning("Traduction de la description indisponible pour %s : %s", ticker, error)
+        return summary if "summary" in locals() else ""
+
 # --- Configuration de l'analyse ---
-st.subheader("Configuration")
+st.subheader(text("configuration"))
 col_index, col_select, col_slider = st.columns([1, 1, 1])
 
 with col_index:
     selected_index = st.selectbox(
-        "Sélectionnez l'indice :",
+        text("index"),
         options=list(INDEX_FILES.keys()),
     )
 
 index_companies = load_index_companies(selected_index)
+index_metadata = load_index_metadata(selected_index)
 
 with col_select:
     selected_company = st.selectbox(
-        "Sélectionnez l'action à étudier :",
+        text("company"),
         options=list(index_companies.keys()),
         index=(list(index_companies.keys()).index("LVMH")
                if "LVMH" in index_companies else 0),
@@ -204,11 +328,22 @@ with col_select:
 
 with col_slider:
     nb_annees = st.slider(
-        "Sélectionnez le nombre d'années d'historique :", 
+        text("years"),
         min_value=5, max_value=30, value=20, step=1
     )
 
 ticker_symbol = index_companies[selected_company]
+
+company_description = load_company_description(ticker_symbol, language)
+if company_description:
+    st.markdown(f"**{text('activity')} :** {company_description}")
+
+if index_metadata and selected_company in index_metadata:
+    selected_metadata = index_metadata[selected_company]
+    st.caption(
+        f"Nature : {selected_metadata['label']} | "
+        f"{selected_metadata['note']}"
+    )
 
 # 2. Fonction de téléchargement (Prix + Dividendes)
 @st.cache_data(ttl=3600)
@@ -257,7 +392,7 @@ def load_data_and_dividends(ticker, years):
         
     return df, div_series
 
-with st.spinner(f"Téléchargement des données de {selected_company}..."):
+with st.spinner(text("download", company=selected_company)):
     data, dividends = load_data_and_dividends(ticker_symbol, nb_annees)
 
 if not data.empty:
@@ -378,18 +513,18 @@ if not data.empty:
         st.error("Impossible de calculer les indicateurs clés")
         st.stop()
     
-    col1.metric(f"Prix Actuel ({selected_company})", f"{current_price:.2f} €")
-    col2.metric("Valeur Théorique (Moyenne)", f"{current_reg:.2f} €")
-    col3.metric("Écart à la Moyenne", f"{deviation_pct:+.2f} %")
-    col4.metric("Pente (Croissance Annuelle)", f"{pente_annuelle_pct:+.2f} % / an")
-    col5.metric("Coefficient de Détermination (R2) ", f"{r2:+.2f}")
+    col1.metric(text("current_price", company=selected_company), f"{current_price:.2f} €")
+    col2.metric(text("theoretical_value"), f"{current_reg:.2f} €")
+    col3.metric(text("deviation"), f"{deviation_pct:+.2f} %")
+    col4.metric(text("growth"), f"{pente_annuelle_pct:+.2f} % / an")
+    col5.metric(text("r2"), f"{r2:+.2f}")
     
     # --- 1er GRAPHIQUE : RÉGRESSION LOGARITHMIQUE ---
-    st.write("### Droite de régression du cours en échelle logarithme")
+    st.write(f"### {text('regression')}")
     fig_reg = go.Figure()
     
-    fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Price'], name=f'Cours de {selected_company}', line=dict(color='#1f77b4', width=2)))
-    fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Regression'], name='Régression Linéaire (Tendance)', line=dict(color='orange', width=2)))
+    fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Price'], name=text('price', company=selected_company), line=dict(color='#1f77b4', width=2)))
+    fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Regression'], name=text('trend'), line=dict(color='orange', width=2)))
     fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['+1_STD'], name='+1 Écart-type', line=dict(color='green', width=1, dash='dash')))
     fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['+2_STD'], name='+2 Écart-type', line=dict(color='darkgreen', width=1, dash='dot')))
     fig_reg.add_trace(go.Scatter(x=df_clean.index, y=df_clean['-1_STD'], name='-1 Écart-type', line=dict(color='red', width=1, dash='dash')))
@@ -409,7 +544,7 @@ if not data.empty:
     st.plotly_chart(fig_reg, use_container_width=True, config=config_graphique)
     
     # --- 2ème GRAPHIQUE : HISTORIQUE DES DIVIDENDES ---
-    st.write("### Historique des Dividendes Versés")
+    st.write(f"### {text('dividends')}")
     
     if not dividends.empty:
         try:
@@ -424,13 +559,13 @@ if not data.empty:
             fig_div.add_trace(go.Bar(
                 x=dividends_display.index,
                 y=dividends_display.values,
-                name="Dividende versé",
+                name=text("dividend"),
                 marker_color="#2ca02c", 
                 width=DIVIDEND_BAR_WIDTH_MS, 
                 text=np.round(dividends_display.values, 2),
                 textposition='outside',             
                 textfont=dict(size=11, color='black'),
-                hovertemplate="<b>Date du détachement :</b> %{x|%d %B %Y}<br><b>Montant :</b> %{y:.2f} €<extra></extra>"
+                hovertemplate=f"<b>{text('dividend_date')} :</b> %{{x|%d %B %Y}}<br><b>{text('dividend_amount')} :</b> %{{y:.2f}} €<extra></extra>"
             ))
             
             max_dividend = max(dividends_display.values)
@@ -456,7 +591,7 @@ if not data.empty:
             logger.error(f"Erreur lors de l'affichage du graphique des dividendes: {str(e)}")
             st.error(f"Impossible d'afficher le graphique des dividendes: {str(e)}")
     else:
-        st.info(f"Aucun dividende n'a été enregistré par Yahoo Finance pour {selected_company} sur cette période.")
+        st.info(text("no_dividends", company=selected_company))
         
 else:
-    st.warning(f"Aucune donnée disponible pour {selected_company}.")
+    st.warning(text("no_data", company=selected_company))
